@@ -108,12 +108,26 @@ return {
 			if idx == 1 then
 				ya.emit("cd", { root })
 			elseif idx == 2 then
-				local value, event = ya.input {
-					title = "cd (from " .. root .. "/)",
-					pos = { "top-center", y = 3, w = 50 },
-				}
-				if event == 1 and value and value ~= "" then
-					ya.emit("cd", { root .. "/" .. value })
+				-- fzf でプロジェクトルート以下のディレクトリを選択
+				local short = root:match("[^/]+$") or root
+				local cmd = string.format(
+					"(fd --type d --no-ignore --exclude .git --base-directory '%s' 2>/dev/null || fdfind --type d --no-ignore --exclude .git --base-directory '%s' 2>/dev/null) | fzf --prompt='%s/ > '",
+					root, root, short
+				)
+				local _permit = ui.hide()
+				local child, err = Command("sh")
+					:arg("-c")
+					:arg(cmd)
+					:stdin(Command.INHERIT)
+					:stdout(Command.PIPED)
+					:stderr(Command.INHERIT)
+					:spawn()
+				if child then
+					local output = child:wait_with_output()
+					if output and output.status.success and output.stdout ~= "" then
+						local target = output.stdout:gsub("\n$", "")
+						ya.emit("cd", { root .. "/" .. target })
+					end
 				end
 			else
 				local bm = bookmarks[idx - 2]
