@@ -6,12 +6,19 @@ Register your project roots once, then jump between projects and navigate to com
 
 ## Features
 
-- **Project jumps** — Switch between registered projects in 3 keystrokes (`gp` + key)
+- **Project jumps** — Switch between registered projects in 3 keystrokes (`gp` + key), or fuzzy search with `Space`
 - **Relative bookmarks** — Jump to common subdirectories relative to the current project root (`g.` + key)
-- **Go to root** — Return to the project root from anywhere within it (`g.` + `Space`)
-- **Freeform relative cd** — Type any relative path to navigate from the project root (`g.` + `/`)
+- **Fuzzy search** — Filter bookmarks and projects with fzf (`Space` in any menu)
+- **Recursive directory search** — Browse all subdirectories under the project root with fzf (`g.` + `/`)
+- **Go to root** — Return to the project root from anywhere within it (`g.` + `.`)
+- **Smart filtering** — Only bookmarks that exist in the current project are shown
 - **Tab-independent** — Roots are resolved by path ancestry, so tab open/close never breaks anything
 - **Dynamic roots** — Optionally register ad-hoc roots at runtime for unlisted projects
+
+## Requirements
+
+- [fzf](https://github.com/junegunn/fzf) — for fuzzy search features
+- [fd](https://github.com/sharkdp/fd) — for recursive directory search (`g.` + `/`)
 
 ## Installation
 
@@ -46,6 +53,8 @@ require("basecamp"):setup({
 })
 ```
 
+You can freely define many bookmarks — only those that actually exist in the current project will appear in the menu. This means you can share one bookmark list across all projects without worrying about clutter.
+
 ### keymap.toml
 
 ```toml
@@ -73,19 +82,23 @@ desc = "Set/unset project root"
 Press `gp` to see all registered projects, then press the assigned key to jump:
 
 ```
-gp → [n] nvim  [1] Alpha  [2] Beta
+gp → [SPC] Fuzzy search  [n] nvim  [1] Alpha  [2] Beta
 ```
+
+- **`Space`** — Fuzzy search projects with fzf
+- **Any project key** — Jump directly to that project
 
 ### Navigate within a project (`g.`)
 
 Press `g.` anywhere inside a project to see bookmarks, plus built-in actions:
 
 ```
-g. → [SPC] Go to root  [/] Relative cd...  [s] Source  [t] Tests  [d] Docs ...
+g. → [SPC] Fuzzy search bookmarks  [.] Go to root  [/] Relative cd...  [s] Source  [t] Tests ...
 ```
 
-- **`Space`** — Jump to the project root
-- **`/`** — Type a relative path (e.g. `src/components`)
+- **`Space`** — Fuzzy search existing bookmarks with fzf
+- **`.`** — Jump to the project root
+- **`/`** — Browse all subdirectories under the project root with fzf
 - **Any bookmark key** — Jump to that subdirectory
 
 ### Dynamic roots (`gr`)
@@ -99,7 +112,7 @@ Basecamp finds your current project by checking which registered root is the dee
 - Nested projects work correctly (the most specific root wins)
 - Multiple tabs in the same project share the same root
 - Tab open/close has no effect on root resolution
-- Bookmarks that don't exist in a particular project simply fail gracefully
+- Bookmarks that don't exist in a particular project are automatically hidden from the menu
 
 ## License
 

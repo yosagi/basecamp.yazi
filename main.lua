@@ -6,8 +6,9 @@
 -- Roots are matched by path ancestry, independent of tabs.
 --
 -- Commands:
---   projects   : Jump to a registered project
---   bookmarks  : Navigate relative to current project root
+--   projects   : Jump to a registered project (Space for fzf search)
+--   bookmarks  : Navigate relative to current project root (Space for fzf)
+--   root       : Jump to current project root
 --   set        : Dynamically register/unregister current directory as root
 
 local get_state = ya.sync(function(state, key) return state[key] end)
@@ -49,6 +50,99 @@ local function notify_no_root()
 	ya.notify { title = "Basecamp", content = "No project root found (use projects to jump)", timeout = 3, level = "warn" }
 end
 
+-- fzf でプロジェクト一覧を絞り込み選択
+local function select_project_fuzzy(projects)
+	local permit = ui.hide()
+	local input_lines = {}
+	for _, p in ipairs(projects) do
+		input_lines[#input_lines + 1] = p.desc .. "\t" .. p.path
+	end
+
+	local child = Command("fzf")
+		:arg("--prompt"):arg("Project > ")
+		:stdin(Command.PIPED):stdout(Command.PIPED):stderr(Command.INHERIT)
+		:spawn()
+	if not child then
+		permit:drop()
+		return nil
+	end
+
+	child:write_all(table.concat(input_lines, "\n"))
+	child:flush()
+	local output = child:wait_with_output()
+	permit:drop()
+
+	if not output or not output.status.success then return nil end
+	local selected = output.stdout:gsub("[\r\n]+$", "")
+	local path = selected:match("\t(.+)$")
+	return path
+end
+
+-- fzf で登録済みブックマークを絞り込み選択（実在するもののみ）
+local function select_bookmark_fuzzy(bookmarks, root)
+	local permit = ui.hide()
+	local input_lines = {}
+	for _, bm in ipairs(bookmarks) do
+		local full_path = root .. "/" .. bm.path
+		local cha = fs.cha(Url(full_path))
+		if cha and cha.is_dir then
+			local desc = bm.desc or bm.path
+			input_lines[#input_lines + 1] = desc .. "\t" .. bm.path
+		end
+	end
+
+	if #input_lines == 0 then
+		permit:drop()
+		ya.notify { title = "Basecamp", content = "No existing bookmarks found", timeout = 3, level = "warn" }
+		return nil
+	end
+
+	local child = Command("fzf")
+		:arg("--prompt"):arg("Bookmark > ")
+		:stdin(Command.PIPED):stdout(Command.PIPED):stderr(Command.INHERIT)
+		:spawn()
+	if not child then
+		permit:drop()
+		return nil
+	end
+
+	child:write_all(table.concat(input_lines, "\n"))
+	child:flush()
+	local output = child:wait_with_output()
+	permit:drop()
+
+	if not output or not output.status.success then return nil end
+	local selected = output.stdout:gsub("[\r\n]+$", "")
+	local rel_path = selected:match("\t(.+)$")
+	if rel_path then return root .. "/" .. rel_path end
+	return nil
+end
+
+-- fzf でプロジェクトルート以下のディレクトリを選択
+local function select_relative_fuzzy(root)
+	local short = root:match("[^/]+$") or root
+	local cmd = string.format(
+		"(fd --type d --no-ignore --exclude .git --base-directory '%s' 2>/dev/null || fdfind --type d --no-ignore --exclude .git --base-directory '%s' 2>/dev/null) | fzf --prompt='%s/ > '",
+		root, root, short
+	)
+	local permit = ui.hide()
+	local child = Command("sh")
+		:arg("-c"):arg(cmd)
+		:stdin(Command.INHERIT):stdout(Command.PIPED):stderr(Command.INHERIT)
+		:spawn()
+	if not child then
+		permit:drop()
+		return nil
+	end
+
+	local output = child:wait_with_output()
+	permit:drop()
+
+	if not output or not output.status.success or output.stdout == "" then return nil end
+	local target = output.stdout:gsub("\n$", "")
+	return root .. "/" .. target
+end
+
 return {
 	setup = function(state, opts)
 		state.bookmarks = opts and opts.bookmarks or {}
@@ -74,14 +168,22 @@ return {
 				return
 			end
 
-			local cands = {}
+			local cands = {
+				{ on = "<Space>", desc = "Fuzzy search" },
+			}
 			for _, p in ipairs(projects) do
 				cands[#cands + 1] = { on = p.key, desc = p.desc }
 			end
 
 			local idx = ya.which { cands = cands }
-			if idx then
-				ya.emit("cd", { projects[idx].path })
+			if not idx then return end
+
+			if idx == 1 then
+				local path = select_project_fuzzy(projects)
+				if path then ya.emit("cd", { path }) end
+			else
+				local p = projects[idx - 1]
+				if p then ya.emit("cd", { p.path }) end
 			end
 
 		elseif cmd == "bookmarks" then
@@ -95,44 +197,43 @@ return {
 
 			local bookmarks = get_state("bookmarks") or {}
 			local cands = {
-				{ on = "<Space>", desc = "Go to root: " .. root },
-				{ on = "/", desc = "Relative cd..." },
+				{ on = "<Space>", desc = "Fuzzy search bookmarks", action = "fuzzy" },
+				{ on = ".", desc = "Go to root: " .. root, action = "root" },
+				{ on = "/", desc = "Relative cd (recursive)...", action = "relative" },
 			}
 			for _, bm in ipairs(bookmarks) do
-				cands[#cands + 1] = { on = bm.key, desc = bm.desc or bm.path }
+				local full_path = root .. "/" .. bm.path
+				local cha = fs.cha(Url(full_path))
+				if cha and cha.is_dir then
+					cands[#cands + 1] = { on = bm.key, desc = bm.desc or bm.path, action = "bookmark", path = bm.path }
+				end
 			end
 
 			local idx = ya.which { cands = cands }
 			if not idx then return end
 
-			if idx == 1 then
+			local selected = cands[idx]
+			if selected.action == "fuzzy" then
+				local path = select_bookmark_fuzzy(bookmarks, root)
+				if path then ya.emit("cd", { path }) end
+			elseif selected.action == "root" then
 				ya.emit("cd", { root })
-			elseif idx == 2 then
-				-- fzf でプロジェクトルート以下のディレクトリを選択
-				local short = root:match("[^/]+$") or root
-				local cmd = string.format(
-					"(fd --type d --no-ignore --exclude .git --base-directory '%s' 2>/dev/null || fdfind --type d --no-ignore --exclude .git --base-directory '%s' 2>/dev/null) | fzf --prompt='%s/ > '",
-					root, root, short
-				)
-				local _permit = ui.hide()
-				local child, err = Command("sh")
-					:arg("-c")
-					:arg(cmd)
-					:stdin(Command.INHERIT)
-					:stdout(Command.PIPED)
-					:stderr(Command.INHERIT)
-					:spawn()
-				if child then
-					local output = child:wait_with_output()
-					if output and output.status.success and output.stdout ~= "" then
-						local target = output.stdout:gsub("\n$", "")
-						ya.emit("cd", { root .. "/" .. target })
-					end
-				end
-			else
-				local bm = bookmarks[idx - 2]
-				ya.emit("cd", { root .. "/" .. bm.path })
+			elseif selected.action == "relative" then
+				local path = select_relative_fuzzy(root)
+				if path then ya.emit("cd", { path }) end
+			elseif selected.action == "bookmark" then
+				ya.emit("cd", { root .. "/" .. selected.path })
 			end
+
+		elseif cmd == "root" then
+			local roots = get_state("roots") or {}
+			local cwd = normalize(get_cwd())
+			local root = find_root(roots, cwd)
+			if not root then
+				notify_no_root()
+				return
+			end
+			ya.emit("cd", { root })
 
 		elseif not cmd or cmd == "set" then
 			local roots = get_state("roots") or {}
