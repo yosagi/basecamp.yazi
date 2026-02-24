@@ -13,12 +13,14 @@ Register your project roots once, then jump between projects and navigate to com
 - **Go to root** — Return to the project root from anywhere within it (`g.` + `.`)
 - **Smart filtering** — Only bookmarks that exist in the current project are shown
 - **Tab-independent** — Roots are resolved by path ancestry, so tab open/close never breaks anything
+- **Git worktree jumps** — List and jump to git worktrees with fzf (`gw`), automatically registered as project roots
 - **Dynamic roots** — Optionally register ad-hoc roots at runtime for unlisted projects
 
 ## Requirements
 
 - [fzf](https://github.com/junegunn/fzf) — for fuzzy search features
 - [fd](https://github.com/sharkdp/fd) — for recursive directory search (`g.` + `/`)
+- [git](https://git-scm.com/) — for worktree listing (`gw`)
 
 ## Installation
 
@@ -68,6 +70,12 @@ on   = [ "g", "." ]
 run  = "plugin basecamp -- bookmarks"
 desc = "Project-relative bookmarks"
 
+# Optional: jump to a git worktree and set as project root
+[[mgr.prepend_keymap]]
+on   = [ "g", "w" ]
+run  = "plugin basecamp -- worktrees"
+desc = "Jump to a git worktree"
+
 # Optional: dynamically register current directory as a root
 [[mgr.prepend_keymap]]
 on   = [ "g", "r" ]
@@ -100,6 +108,17 @@ g. → [SPC] Fuzzy search bookmarks  [.] Go to root  [/] Relative cd...  [s] Sou
 - **`.`** — Jump to the project root
 - **`/`** — Browse all subdirectories under the project root with fzf
 - **Any bookmark key** — Jump to that subdirectory
+
+### Jump to a git worktree (`gw`)
+
+Press `gw` to list all git worktrees for the current repository and select one with fzf:
+
+```
+gw → fzf: master  /home/user/work/myproject
+           feature /home/user/work/myproject-feature
+```
+
+The selected worktree is automatically registered as a project root, so `g.` bookmarks and root navigation work immediately after jumping.
 
 ### Dynamic roots (`gr`)
 

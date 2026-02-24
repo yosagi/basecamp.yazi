@@ -8,6 +8,7 @@
 -- Commands:
 --   projects   : Jump to a registered project (Space for fzf search)
 --   bookmarks  : Navigate relative to current project root (Space for fzf)
+--   worktrees  : Jump to a git worktree (fzf) and set as temporary root
 --   root       : Jump to current project root
 --   set        : Dynamically register/unregister current directory as root
 
@@ -118,6 +119,80 @@ local function select_bookmark_fuzzy(bookmarks, root)
 	return nil
 end
 
+-- git worktree list --porcelain をパースして worktree 一覧を返す
+local function list_worktrees()
+	local child = Command("git")
+		:arg("worktree"):arg("list"):arg("--porcelain")
+		:stdout(Command.PIPED):stderr(Command.PIPED)
+		:spawn()
+	if not child then return nil end
+
+	local output = child:wait_with_output()
+	if not output or not output.status.success then return nil end
+
+	local worktrees = {}
+	local current = nil
+	for line in output.stdout:gmatch("[^\n]+") do
+		local path = line:match("^worktree (.+)")
+		local branch = line:match("^branch refs/heads/(.+)")
+		local bare = line:match("^bare$")
+		local detached = line:match("^HEAD (.+)")
+		if path then
+			-- 新しい worktree エントリ開始 → 前のエントリを確定
+			if current then
+				if not current.branch and current.head then
+					current.branch = current.head:sub(1, 8) .. "..."
+				end
+				worktrees[#worktrees + 1] = current
+			end
+			current = { path = normalize(path) }
+		elseif current and branch then
+			current.branch = branch
+		elseif current and bare then
+			current.branch = "(bare)"
+		elseif current and detached then
+			current.head = detached
+		end
+	end
+	-- 最後のエントリ
+	if current then
+		if not current.branch and current.head then
+			current.branch = current.head:sub(1, 8) .. "..."
+		end
+		worktrees[#worktrees + 1] = current
+	end
+	return worktrees
+end
+
+-- fzf で git worktree を選択
+local function select_worktree_fuzzy(worktrees)
+	local permit = ui.hide()
+	local input_lines = {}
+	for _, wt in ipairs(worktrees) do
+		local label = (wt.branch or "detached") .. "\t" .. wt.path
+		input_lines[#input_lines + 1] = label
+	end
+
+	local child = Command("fzf")
+		:arg("--prompt"):arg("Worktree > ")
+		:stdin(Command.PIPED):stdout(Command.PIPED):stderr(Command.INHERIT)
+		:spawn()
+	if not child then
+		permit:drop()
+		return nil
+	end
+
+	child:write_all(table.concat(input_lines, "\n"))
+	child:flush()
+	local output = child:wait_with_output()
+	permit:drop()
+
+	if not output or not output.status.success then return nil end
+	local selected = output.stdout:gsub("[\r\n]+$", "")
+	local path = selected:match("\t(.+)$")
+	return path
+end
+
 -- fzf でプロジェクトルート以下のディレクトリを選択
 local function select_relative_fuzzy(root)
 	local short = root:match("[^/]+$") or root
@@ -223,6 +298,22 @@ return {
 				if path then ya.emit("cd", { path }) end
 			elseif selected.action == "bookmark" then
 				ya.emit("cd", { root .. "/" .. selected.path })
+			end
+
+		elseif cmd == "worktrees" then
+			local worktrees = list_worktrees()
+			if not worktrees or #worktrees == 0 then
+				ya.notify { title = "Basecamp", content = "No git worktrees found", timeout = 3, level = "warn" }
+				return
+			end
+
+			local path = select_worktree_fuzzy(worktrees)
+			if path then
+				-- roots に追加して cd
+				local roots = get_state("roots") or {}
+				roots[path] = true
+				set_state("roots", roots)
+				ya.emit("cd", { path })
 			end
 
 		elseif cmd == "root" then
