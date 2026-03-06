@@ -85,7 +85,7 @@ local function select_bookmark_fuzzy(bookmarks, root)
 	local input_lines = {}
 	for _, bm in ipairs(bookmarks) do
 		local full_path = root .. "/" .. bm.path
-		local cha = fs.cha(Url(full_path))
+		local cha = fs.cha(Url(full_path), true)
 		if cha and cha.is_dir then
 			local desc = bm.desc or bm.path
 			input_lines[#input_lines + 1] = desc .. "\t" .. bm.path
@@ -278,7 +278,7 @@ return {
 			}
 			for _, bm in ipairs(bookmarks) do
 				local full_path = root .. "/" .. bm.path
-				local cha = fs.cha(Url(full_path))
+				local cha = fs.cha(Url(full_path), true)
 				if cha and cha.is_dir then
 					cands[#cands + 1] = { on = bm.key, desc = bm.desc or bm.path, action = "bookmark", path = bm.path }
 				end
