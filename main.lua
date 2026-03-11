@@ -56,7 +56,16 @@ local function select_project_fuzzy(projects)
 	local permit = ui.hide()
 	local input_lines = {}
 	for _, p in ipairs(projects) do
-		input_lines[#input_lines + 1] = p.desc .. "\t" .. p.path
+		local cha = fs.cha(Url(p.path), true)
+		if cha and cha.is_dir then
+			input_lines[#input_lines + 1] = p.desc .. "\t" .. p.path
+		end
+	end
+
+	if #input_lines == 0 then
+		permit:drop()
+		ya.notify { title = "Basecamp", content = "No existing projects found", timeout = 3, level = "warn" }
+		return nil
 	end
 
 	local child = Command("fzf")
@@ -247,7 +256,10 @@ return {
 				{ on = "<Space>", desc = "Fuzzy search" },
 			}
 			for _, p in ipairs(projects) do
-				cands[#cands + 1] = { on = p.key, desc = p.desc }
+				local cha = fs.cha(Url(p.path), true)
+				if cha and cha.is_dir then
+					cands[#cands + 1] = { on = p.key, desc = p.desc }
+				end
 			end
 
 			local idx = ya.which { cands = cands }
